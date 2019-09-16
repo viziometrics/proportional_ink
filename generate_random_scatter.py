@@ -57,7 +57,9 @@ tick_size_length_min = 0
 tick_size_length_max = 12
 
 points_nb_min = 10
+bars_min = 2
 points_nb_max = 130
+bars_max = 100
 x_min_top = -2
 x_max_top = 5
 y_min_top = -2
@@ -136,10 +138,15 @@ def get_random_plot(name, direc):
 
     # ACTUAL POINTS
     points_nb = int(points_nb_min + (np.random.rand(1)[0]**1.5)*(points_nb_max-points_nb_min))
+    #print points_nb
     x_scale =  int(x_min_top+np.random.rand(1)[0]*(x_max_top - x_min_top))
+    #print x_scale
     y_scale =  int(y_min_top+np.random.rand(1)[0]*(y_max_top - y_min_top))
+    #print y_scale
     x_scale_range = x_scale + int(np.random.rand(1)[0]*x_scale_range_max)
+    #print x_scale_range
     y_scale_range = y_scale + int(np.random.rand(1)[0]*y_scale_range_max)
+    #print y_scale_range
     x_min = (-np.random.rand(1)[0]+np.random.rand(1)[0])*10**(x_scale)
     x_max = (-np.random.rand(1)[0]+np.random.rand(1)[0])*10**(x_scale_range)
     x_min, x_max = min(x_min,x_max), max(x_min,x_max)
@@ -199,11 +206,15 @@ def get_random_plot(name, direc):
         categories.append(cat_in_dict(cat,cat_dict))
         s.append(s_)
         if e_:
-            plt.scatter(_x, _y, s=s_, color = c_, marker=m_, facecolors='none')
+             plt.scatter(_x, _y, s=s_, color = c_, marker=m_, facecolors='none')
+             
         else:
-            plt.scatter(_x, _y, s=s_, color = c_, marker=m_)
+             plt.scatter(_x, _y, s=s_, color = c_, marker=m_)
+             
 
     # PAD BETWEEN TICKS AND LABELS
+    #labs = [item.get_text() for item in ax.get_xticklabels()]
+    #print labs
     pad_x = max(tick_size[1]+0.5,int(pad_min + np.random.rand(1)[0]*(pad_max-pad_min)))
     pad_y = max(tick_size[1]+0.5,int(pad_min + np.random.rand(1)[0]*(pad_max-pad_min)))
     direction_ticks_x = random.choice(direction_ticks)
@@ -305,9 +316,11 @@ def get_random_plot(name, direc):
 
     # TEXTS FOR AXIS LABELS AND TITLE
     label_x_length = int(axes_label_length_min + np.random.rand(1)[0]*(axes_label_length_max-axes_label_length_min))
+    #print label_x_length
     label_y_length = int(axes_label_length_min + np.random.rand(1)[0]*(axes_label_length_max-axes_label_length_min))
     title_length = int(title_length_min + np.random.rand(1)[0]*(title_length_max-title_length_min))
     x_label = ("".join( [random.choice(string.ascii_letters+'       ') for i in range(label_x_length)] )).strip()
+    #print x_label
     y_label = ("".join( [random.choice(string.ascii_letters+'       ') for i in range(label_y_length)] )).strip()
     title = ("".join( [random.choice(string.ascii_letters+'       ') for i in range(title_length)] )).strip()
     plt.xlabel(x_label , fontproperties = axes_font)
@@ -319,6 +332,7 @@ def get_random_plot(name, direc):
 
     for label in ax.get_xticklabels():
         label.set_fontproperties(ticks_font)
+    
 
     for label in ax.get_yticklabels():
         label.set_fontproperties(ticks_font)
@@ -337,7 +351,7 @@ def get_random_plot(name, direc):
     deltay = 0.05*abs(ymax-ymin)
     plt.ylim(ymin - deltay, ymax + deltay)
 
-
+    
     # BACKGROUND AND PATCH COLORS
     if np.random.rand(1)[0]>0.75:
         color_bg = (1-colorbg_transparant_max)+colorbg_transparant_max*np.random.rand(3)
@@ -347,9 +361,12 @@ def get_random_plot(name, direc):
         fig.patch.set_facecolor(color_bg)
 
     # MAKE SURE THE PLOT FITS INSIDE THE FIGURES
-    plt.tight_layout()
+    try:
+        plt.tight_layout()
 
-    plt.savefig("./data/{}/".format(direc)+name, dpi='figure', facecolor=fig.get_facecolor())
+        plt.savefig("./data/{}/".format(direc)+name, dpi='figure', facecolor=fig.get_facecolor())
+    except RuntimeError:
+        pass
 
     return ax, fig, x, y, s, categories, tick_size, axes_x_pos, axes_y_pos
 

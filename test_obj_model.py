@@ -62,6 +62,7 @@ def main(model_dir, image_dir, true_idl, iteration, iou_threshold, conf_threshol
     saver = tf.train.Saver()
     with tf.Session() as sess:
         sess.run(tf.initialize_all_variables())
+        #print tf.train.get_checkpoint_state(model_dir)
         saver.restore(sess, '{}/save.ckpt-{}'.format(model_dir,iteration))
 
         annolist = al.AnnoList()

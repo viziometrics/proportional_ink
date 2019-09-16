@@ -24,6 +24,7 @@ from scipy import ndimage
 import time
 import argparse
 import scatteract_logger
+import re
 
 tools = pyocr.get_available_tools()
 if len(tools) == 0:
@@ -66,7 +67,7 @@ def compute_skew(image):
     except cv2.error:
         rectangle = ((0,0),(0,0),0)
     angle = rectangle[-1]
-
+    #print angle
     if angle <= -45:
         angle = -(90 + angle)
         height = rectangle[1][1]
@@ -138,11 +139,30 @@ def extract_number(digit_string):
 
     try:
         pred = float(digit_string.replace(" ", ""))
+        
     except ValueError:
         scatteract_logger.get_logger().error("Output from tesseract is not a float " + digit_string)
         pred = None
 
     return pred
+
+def clean_digits(digit_string):
+    """
+    Method used to clean up the output from tesseract.
+    Inputs:
+    digit_string (string): String output from tesseract.
+    Outputs:
+    clean_digit (string) : String after removing non-ascii characters and extra characters from output of tesseract
+    """
+    #clean = re.compile('|'.join([r'[?|$%\{\[\]\}&*@#()~`\"\'\\!=:;,_]',u"\u00b0"]))
+    #clean_digit = re.sub(clean,'',digit_string)
+    clean_digit = re.sub(u"\u2014", "-", digit_string)
+    clean_digit = re.sub('[^a-zA-Z0-9-+/.]+','',clean_digit)
+    if clean_digit.endswith('-') | clean_digit.endswith('/') | clean_digit.endswith('+') | clean_digit.endswith('.'):
+        clean_digit = clean_digit[:-1]
+    
+    #print clean_digit
+    return clean_digit    
 
 
 def get_label(image, size = 130):
@@ -166,11 +186,13 @@ def get_label(image, size = 130):
         lang="eng+osd",
         builder=pyocr.tesseract.DigitBuilder(tesseract_layout=6)
         )
-
-    if contours_len==2 and len(digits)==1:  #Hacky, but helps tesseract on negative single digits
-        digits = '-' + digits
-
-    pred = extract_number(digits)
+    
+    #if contours_len==2 and len(digits)==1:  #Hacky, but helps tesseract on negative single digits
+     #   digits = '-' + digits
+    
+    clean_digit = clean_digits(digits)
+    pred = extract_number(clean_digit)
+    #print pred
 
     return pred
 

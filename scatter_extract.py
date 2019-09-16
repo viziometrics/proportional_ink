@@ -24,7 +24,7 @@ from tensorbox.utils.train_utils import add_rectangles, rescale_boxes
 import cv2
 import numpy as np
 from PIL import Image
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, KMeans
 import tesseract
 from sklearn.linear_model import RANSACRegressor
 import pandas as pd
@@ -32,6 +32,10 @@ import time
 import argparse
 import os
 import scatteract_logger
+import pytesseract
+import re
+from collections import Counter
+
 
 
 def parse_coords(idl_file_name):
@@ -60,6 +64,37 @@ def parse_coords(idl_file_name):
 
     return df_dict
 
+def parse_labels(idl_file_name):
+    """
+    Function that reads the labels idl file and returns a pandas dataframe.
+    Inputs:
+    idl_file_dir: (string) File path.
+    Outputs:
+    df (dataframe): Dataframe, ImageName is the plot name, 'Y-labels' is the labels.
+    """
+
+    df_dict = {}
+    with open(idl_file_name, 'r') as myfile:
+        for line in myfile:
+            file_name = line.split(':')[0]
+            file_name = '/'+file_name[1:len(file_name)-1]
+            #print file_name            
+
+            if line.split(':')[1].find('),'):
+                labels = line.split(':')[1].split('),')
+                  
+            else:
+                labels = line.split(':')[1]
+                
+            labels = [label.replace('(','').replace(')','').replace(';','').replace(' ','').replace('\n','').split(',') for label in labels]
+            labels = [float(num) for label in labels for num in label]   
+            #print len(labels), labels
+            
+            df_dict[file_name] = labels
+        df = pd.DataFrame(list(df_dict.items()), columns = ['ImageName','Y-labels-true'])
+        #print df  
+          
+    return df
 
 class PlotExtractor(object):
     """
@@ -147,6 +182,7 @@ class PlotExtractor(object):
         """
 
         img = Image.open(image_name)
+        
         if np.shape(img)[-1]==4:
             bg = Image.new("RGB", img.size, (255,255,255))
             bg.paste(img,img)
@@ -192,22 +228,61 @@ class PlotExtractor(object):
 
         self.draw_images(image_dir, true_annos_dict, pred_dict, image_output_dir, true_idl_dict)
 
-        pred_dict['labels'] = self.get_ocr(pred_dict['labels'], image_dir)
+        pred_dict['labels'] = self.get_ocr(pred_dict['labels'], image_dir,3)
 
-        pred_dict['labels'] = self.get_closest_ticks(pred_dict['labels'], pred_dict['ticks'])
+        #pred_dict['labels'] = self.get_closest_ticks(pred_dict['labels'], pred_dict['ticks'])
 
-        pred_labels_X, pred_labels_Y = self.split_labels_XY(pred_dict['labels'])
+        #pred_labels_X, pred_labels_Y = self.split_labels_XY(pred_dict['labels'],20)         
 
-        self.regressor_x_dict = self.get_conversion(pred_labels_X, cat = 'x')
-        self.regressor_y_dict = self.get_conversion(pred_labels_Y, cat = 'y')
+        #self.regressor_x_dict = self.get_conversion(pred_labels_X, cat = 'x')
+        #self.regressor_y_dict = self.get_conversion(pred_labels_Y, cat = 'y')
 
-        df_dict = self.predict_points(pred_dict['points'],self.regressor_x_dict, self.regressor_y_dict, csv_output_dir)
+
+        pred_labels_Y = self.get_close_labels(pred_dict['labels'], cat = 'y')
+        pred_labels_Y.save('test_y.idl')
+        pred_labels_X = self.get_close_labels(pred_dict['labels'], cat = 'x')  
+        pred_labels_X.save('test_x.idl')
+
+	
+        #df_dict = self.predict_points(pred_dict['points'],self.regressor_x_dict, self.regressor_y_dict, csv_output_dir)
 
         mylogger.debug("{} images/sec".format(float(len(pred_dict['labels']))/(time.time()-start_time)))
 
+
+        lab_dict = {}
+        for j, ann in enumerate(pred_dict['labels']):
+            labs = []
+            img = self.open_image(image_dir+ann.imageName)
+            try:
+                orient_text = pytesseract.image_to_osd(img) 
+                rotation = float(re.search('(?<=Rotate: )\d+',str(orient_text)).group(0))                
+                #print rotation
+            except pytesseract.pytesseract.TesseractError:
+                scatteract_logger.get_logger().error("Pytesseract could not detect orientation for" + ann.imageName)
+                rotation = None
+                
+            if rotation == 180 and pred_labels_X[j].rects:
+                pred_labels = pred_labels_X[j]
+            else:
+                pred_labels = pred_labels_Y[j] 
+
+            for rect in pred_labels.rects:
+                labs.append(rect.classID)
+            lab_dict[ann.imagePath+'/'+ann.imageName] = labs
+        #print lab_dict
+        lab_df = pd.DataFrame(list(lab_dict.items()), columns = ['ImageName','Y-labels-pred'])
+        lab_df['Min-label'] = [min(x) if x else None for x in lab_df['Y-labels-pred']]
+        lab_df['Max-label'] = [max(x) if x else None for x in lab_df['Y-labels-pred']] 
+        #print lab_df
+        if csv_output_dir is not None:
+            print 'saving predicted labels'
+            lab_df.to_csv(csv_output_dir + "/labels_pred.csv", index=False)    
+
+
         if coord_idl is not None:
             mylogger.debug("Now using ground truth to test ...")
-            self.get_metrics(df_dict, coord_idl, csv_output_dir, quick = quick, max_dist_perc = max_dist_perc)
+            #self.get_metrics(df_dict, coord_idl, csv_output_dir, quick = quick, max_dist_perc = max_dist_perc)  
+            self.get_metrics_labels(lab_df,coord_idl,csv_output_dir)  
 
         return pred_dict
 
@@ -303,18 +378,70 @@ class PlotExtractor(object):
         for j in range(len(pred_labels)):
 
             img = self.open_image(image_dir+pred_labels[j].imageName)
-
+            
             new_rects = []
             for rect in pred_labels[j].rects:
                 image = Image.fromarray(np.copy(img[max(0,int(rect.y1)-pixel_extra):int(rect.y2)+pixel_extra, max(0,int(rect.x1)-pixel_extra):int(rect.x2)+pixel_extra,:]))
                 label = tesseract.get_label(image)
+                #print label
                 if label is not None:
                     rect.classID = label
                     new_rects.append(rect)
-
+                    
+            
             pred_labels[j].rects = new_rects
+        
+        pred_labels.save('from_ocr.idl')
 
         return pred_labels
+
+    def get_close_labels(self,pred_labels, cat):
+        """
+        Method that matches the closest labels on each axis
+        Inputs:
+        pred_labels (Annotationlist): (Annotationlist) List of annotation which have the bounding boxes of the labels, and their corresponding values after OCR.
+        cat:  (string)  Axis type, either 'x' or 'y'.
+        Outputs
+        annolist (Annotationlist): Annotation lists for the predicted labels on the X or Y axis.
+        """
+        annolist = al.AnnoList()
+
+        for j in range(len(pred_labels)):
+            new_annot = al.Annotation()
+            new_annot.imageName = pred_labels[j].imageName
+
+            if len(pred_labels[j].rects)>0:
+                #print pred_labels[j].imageName 
+                centers = np.zeros((len(pred_labels[j].rects), len(pred_labels[j].rects)))
+
+                for k in range(len(pred_labels[j].rects)):
+                    for i in range(len(pred_labels[j].rects)):
+                        if cat == 'y':
+                            centers[k,i] = abs(pred_labels[j].rects[k].centerX() - pred_labels[j].rects[i].centerX())
+                        elif cat == 'x':
+                            centers[k,i] = abs(pred_labels[j].rects[k].centerY() - pred_labels[j].rects[i].centerY())
+
+                    if k == 0 or len(np.where(centers[k] <= 10)[0]) > len(close_centers):
+                        close_centers = np.where(centers[k] <= 10)[0]                    
+                #print centers, close_centers
+                                
+
+                new_rects = []
+                for k in range(len(pred_labels[j].rects)):
+                    if len(close_centers) > 1:
+                        if k in close_centers:
+                            new_rects.append(pred_labels[j].rects[k])
+
+                new_annot.rects = new_rects
+                annolist.append(new_annot)
+
+            else:
+                new_annot.rects = []
+                annolist.append(new_annot) 
+
+        annolist.save('close_labels.idl') 
+        return annolist 
+
 
 
     def get_closest_ticks(self, pred_labels, pred_ticks):
@@ -333,6 +460,8 @@ class PlotExtractor(object):
 
             new_annot = al.Annotation()
             new_annot.imageName = pred_labels[j].imageName
+            #print len(pred_labels[j].rects)
+            #print len(pred_ticks[j].rects)
             if len(pred_labels[j].rects)>0 and len(pred_ticks[j].rects)>0:
 
                 distances = np.zeros((len(pred_labels[j].rects),len(pred_ticks[j].rects)))
@@ -340,16 +469,21 @@ class PlotExtractor(object):
                 for k in range(len(pred_labels[j].rects)):
                     for i in range(len(pred_ticks[j].rects)):
                         distances[k,i] = pred_labels[j].rects[k].distance(pred_ticks[j].rects[i])
+                #print distances
 
                 min_index_labels = np.argmin(distances, axis=1)
-                min_index_ticks = np.argmin(distances, axis=0)
+                #print min_index_labels
+                min_index_ticks = np.argmin(distances, axis=0)      
+		#print min_index_ticks
 
                 new_rects = []
                 for k in range(len(pred_labels[j].rects)):
                     min_index = min_index_labels[k]
+                    #print min_index
                     if min_index_ticks[min_index] == k:
                         temp_rect = pred_ticks[j].rects[min_index]
                         temp_rect.classID = pred_labels[j].rects[k].classID
+                        #print temp_rect.classID 
                         new_rects.append(temp_rect)
 
                 new_annot.rects = new_rects
@@ -358,6 +492,7 @@ class PlotExtractor(object):
             else:
                 new_annot.rects = []
                 annolist.append(new_annot)
+        #annolist.save('close_ticks.idl')
 
 
         return annolist
@@ -387,15 +522,19 @@ class PlotExtractor(object):
             X, Y = np.reshape(np.array(X),(len(X),1)), np.reshape(np.array(Y),(len(Y),1))
             std_x = np.std(X)
             std_y = np.std(Y)
-
+            
+                        
             if std_x>0 and std_y>0:
-                db_scan_x = DBSCAN(eps=std_y/eps_std_div, min_samples = 2).fit(Y)
+                db_scan_x = DBSCAN(eps=std_y/(eps_std_div), min_samples = 2).fit(Y)
                 db_scan_y = DBSCAN(eps=std_x/eps_std_div, min_samples = 2).fit(X)
+                
                 cluster_list_x = filter(lambda x: x!=-1, db_scan_x.labels_)
                 cluster_list_y = filter(lambda x: x!=-1, db_scan_y.labels_)
+                #print cluster_list_x, cluster_list_y
                 if len(cluster_list_x)>0 and len(cluster_list_y)>0:
                     cluster_label_x = max(set(cluster_list_x), key=cluster_list_x.count)
                     cluster_label_y = max(set(cluster_list_y), key=cluster_list_y.count)
+                    #print cluster_label_x, cluster_label_y
                     rect_x, rect_y = [], []
                     for k in range(len(db_scan_x.labels_)):
                         if db_scan_x.labels_[k]==cluster_label_x and db_scan_y.labels_[k]!=cluster_label_y:
@@ -403,8 +542,11 @@ class PlotExtractor(object):
                         elif db_scan_y.labels_[k]==cluster_label_y and db_scan_x.labels_[k]!=cluster_label_x:
                             rect_y.append(pred_labels[j].rects[k])
                     pred_X.rects, pred_Y.rects = rect_x, rect_y
+            
 
             pred_labels_X.append(pred_X), pred_labels_Y.append(pred_Y)
+        #pred_labels_Y.save('test_y.idl')
+        #pred_labels_X.save('test_x.idl')
 
         return pred_labels_X, pred_labels_Y
 
@@ -433,6 +575,7 @@ class PlotExtractor(object):
                     elif cat=='y':
                         positions.append((pred_labels[j].rects[k].y1 + pred_labels[j].rects[k].y2)/2.0)
                         labels.append(pred_labels[j].rects[k].classID)
+            #print labels
 
             if len(positions)>1:
                 try:
@@ -444,7 +587,7 @@ class PlotExtractor(object):
             else:
                 reg = None
             regressors[pred_labels[j].imageName] = reg
-
+        #print regressors
         return regressors
 
 
@@ -605,9 +748,10 @@ class PlotExtractor(object):
         metrics_logger = scatteract_logger.get_logger()
 
         for file_name in df_dict_pred:
-
+         
             df_pred = df_dict_pred[file_name]
             df_true = df_dict_true.get(file_name,None)
+             
 
             if df_true is not None:
                 prec, rec = self.get_precision_recall(df_pred,df_true,
@@ -624,6 +768,73 @@ class PlotExtractor(object):
                     count_bad+=1
             else:
                 metrics_logger.warn("No ground truth for :" + file_name)
+
+        metrics_logger.info("Percentage of good extraction (recall and precision above 80%): {}".format(float(count_good)/len(precision_list)))
+        metrics_logger.info("Percentage of perfect extraction (recall and precision at 100%): {}".format(float(count_perfect)/len(precision_list)))
+        metrics_logger.info("Percentage of bad extraction (recall and precision below 10%): {}".format(float(count_bad)/len(precision_list)))
+        metrics_logger.info("Precision: {}".format(np.mean(precision_list)))
+        metrics_logger.info("Recall: {}".format(np.mean(recall_list)))
+        metrics_logger.info("F1 score: {}".format(2*np.mean(recall_list)*np.mean(precision_list)/(np.mean(recall_list)+np.mean(precision_list))))
+
+        df_prec_recall = pd.DataFrame({"image_name":image_name_list,"recall":recall_list,"precision":precision_list})
+        if csv_output_dir is not None:
+            df_prec_recall.to_csv(csv_output_dir + "/" + "precision_recall_list.csv")
+            metrics_logger.debug("Saving a csv of precisions and recalls : {}".format(csv_output_dir + "/" + "precision_recall_list.csv"))
+
+        return df_prec_recall
+
+
+    def get_metrics_labels(self, df_pred, coord_idl, csv_output_dir = None):
+        """
+        Method which computes the precision and recall for all the plots.
+        Inputs:
+        df_pred (Dataframe): Dictionnary of dataframes wich contains the predicted points in label coordinates.
+        coord_idl (string): Path to the idl files which contain the ground truth coordinates
+        
+        Outputs:
+        df_prec_recall : (pandas dataframe) Pandas dataframe of precisions and recalls for each plot.
+        """
+
+        df_true = parse_labels(coord_idl)
+        precision_list, recall_list, image_name_list = [], [], []
+        count_good = 0
+        count_perfect = 0
+        count_bad = 0
+        metrics_logger = scatteract_logger.get_logger()
+        
+
+        df = df_pred.join(df_true.set_index('ImageName'), on='ImageName')
+        #print df
+          
+        for j in range(len(df)):
+            true = df.loc[j,'Y-labels-true']
+            #print true, len(true)
+            pred = df.loc[j,'Y-labels-pred']
+            #print pred, len(pred)
+            
+            labs_nd = list((Counter(true) - Counter(pred)).elements())
+            #print labs_nd
+            inc_labs_d = list((Counter(pred) - Counter(true)).elements())
+            #print inc_labs_d
+            c_labs_d = list((Counter(pred) - Counter(inc_labs_d)).elements())
+            #print c_labs_d
+
+
+            prec = len(c_labs_d)/float(len(pred))
+            #print prec
+            rec = len(c_labs_d)/float(len(true))
+            #print rec        
+            
+            precision_list.append(prec)
+            recall_list.append(rec)
+            image_name_list.append(df.loc[j,'ImageName'])
+            if rec>=0.8 and prec>=0.8:
+                count_good+=1
+            if rec==1.0 and prec==1.0:
+                count_perfect+=1
+            if rec<=0.1 and prec<=0.1:
+                count_bad+=1
+            
 
         metrics_logger.info("Percentage of good extraction (recall and precision above 80%): {}".format(float(count_good)/len(precision_list)))
         metrics_logger.info("Percentage of perfect extraction (recall and precision at 100%): {}".format(float(count_perfect)/len(precision_list)))

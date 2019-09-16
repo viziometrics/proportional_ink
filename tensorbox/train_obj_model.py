@@ -307,7 +307,7 @@ def build(H, q):
     os.environ['CUDA_VISIBLE_DEVICES'] = str(solver['gpu'])
 
     #gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
-    gpu_options = tf.GPUOptions()
+    gpu_options = tf.GPUOptions(allow_growth=True)
     config = tf.ConfigProto(gpu_options=gpu_options)
 
     encoder_net = googlenet_load.init(H, config)
@@ -504,6 +504,7 @@ def train(H, test_images):
 
             if global_step.eval() % H['logging']['save_iter'] == 0 or global_step.eval() == max_iter - 1:
                 saver.save(sess, ckpt_file, global_step=global_step)
+                print('saved: %s' % (ckpt_file))
 
 
 def main():
