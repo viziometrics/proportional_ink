@@ -5,8 +5,8 @@ import numpy as np
 
 def init(H, config=None):
     if config is None:
-        gpu_options = tf.GPUOptions()
-        config = tf.ConfigProto(gpu_options=gpu_options)
+        gpu_options = tf.compat.v1.GPUOptions()
+        config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
 
     k = H['num_classes']
     features_dim = 1024
@@ -19,10 +19,12 @@ def init(H, config=None):
     dense_layer_num_output = [k, 4]
 
     googlenet_graph = tf.Graph()
-    graph_def = tf.GraphDef()
-    tf.set_random_seed(0)
+    
+    graph_def = tf.compat.v1.GraphDef()
+    tf.compat.v1.set_random_seed(0)
+
     with open(graph_def_orig_file) as f:
-        tf.set_random_seed(0)
+        tf.compat.v1.set_random_seed(0)
         graph_def.MergeFromString(f.read())
 
     with googlenet_graph.as_default():
@@ -42,7 +44,7 @@ def init(H, config=None):
         and op.name != 'output'
     ]
 
-    with tf.Session(graph=googlenet_graph, config=config):
+    with tf.compat.v1.Session(graph=googlenet_graph, config=config):
         weights_orig = {
             op.name: op.outputs[0].eval()
             for op in weights_ops
@@ -79,8 +81,9 @@ def init(H, config=None):
     }
 
     W_norm = [tf.nn.l2_loss(weight) for weight in weight_vars.values() + W]
-    W_norm = tf.reduce_sum(tf.pack(W_norm), name='weights_norm')
-    tf.scalar_summary(W_norm.op.name, W_norm)
+    #W_norm = tf.reduce_sum(tf.pack(W_norm), name='weights_norm')
+    W_norm = tf.reduce_sum(tf.stack(W_norm), name='weights_norm')
+    tf.compat.v1.summary.scalar(W_norm.op.name, W_norm)
 
     googlenet = {
         "W": W,
@@ -108,7 +111,7 @@ def model(x, googlenet, H):
         if is_early_loss(op.name):
             continue
         elif op.name == 'avgpool0':
-            pool_op = tf.nn.avg_pool(T['mixed5b'], ksize=[1,H['grid_height'],H['grid_width'],1], strides=[1,1,1,1], padding='VALID', name=op.name)
+            pool_op = tf.nn.avg_pool2d(T['mixed5b'], ksize=[1,H['grid_height'],H['grid_width'],1], strides=[1,1,1,1], padding='VALID', name=op.name)
             T[op.name] = pool_op
 
         else:

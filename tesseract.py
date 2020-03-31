@@ -139,7 +139,7 @@ def extract_number(digit_string):
 
     try:
         pred = float(digit_string.replace(" ", ""))
-        
+        #pred = digit_string.replace(" ","")
     except ValueError:
         scatteract_logger.get_logger().error("Output from tesseract is not a float " + digit_string)
         pred = None
@@ -147,15 +147,7 @@ def extract_number(digit_string):
     return pred
 
 def clean_digits(digit_string):
-    """
-    Method used to clean up the output from tesseract.
-    Inputs:
-    digit_string (string): String output from tesseract.
-    Outputs:
-    clean_digit (string) : String after removing non-ascii characters and extra characters from output of tesseract
-    """
-    #clean = re.compile('|'.join([r'[?|$%\{\[\]\}&*@#()~`\"\'\\!=:;,_]',u"\u00b0"]))
-    #clean_digit = re.sub(clean,'',digit_string)
+    
     clean_digit = re.sub(u"\u2014", "-", digit_string)
     clean_digit = re.sub('[^a-zA-Z0-9-+/.]+','',clean_digit)
     if clean_digit.endswith('-') | clean_digit.endswith('/') | clean_digit.endswith('+') | clean_digit.endswith('.'):
@@ -186,7 +178,9 @@ def get_label(image, size = 130):
         lang="eng+osd",
         builder=pyocr.tesseract.DigitBuilder(tesseract_layout=6)
         )
-    
+    #print digits
+    #print len(digits)
+    #print contours_len
     #if contours_len==2 and len(digits)==1:  #Hacky, but helps tesseract on negative single digits
      #   digits = '-' + digits
     

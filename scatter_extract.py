@@ -82,10 +82,15 @@ def parse_labels(idl_file_name):
 
             if line.split(':')[1].find('),'):
                 labels = line.split(':')[1].split('),')
-                  
+                #labels = [label.replace('(','').replace(')','').replace(';','').replace(' ','').replace('\n','').split(',') 
+#for label in labels]
+                #labels = [float(num) for label in labels for num in label]
+                #print labels   
             else:
                 labels = line.split(':')[1]
-                
+                #labels = labels[1:len(labels)-3].split(',')
+                #labels = [float(label) for label in labels]
+                #print labels
             labels = [label.replace('(','').replace(')','').replace(';','').replace(' ','').replace('\n','').split(',') for label in labels]
             labels = [float(num) for label in labels for num in label]   
             #print len(labels), labels
@@ -158,7 +163,7 @@ class PlotExtractor(object):
         graph = tf.Graph()
         with graph.as_default():
             googlenet = googlenet_load.init(H)
-            x_in = tf.placeholder(tf.float32, name='x_in', shape=[H['image_height'], H['image_width'], 3])
+            x_in = tf.compat.v1.placeholder(tf.float32, name='x_in', shape=[H['image_height'], H['image_width'], 3])
             if H['use_rezoom']:
                 pred_boxes, pred_logits, pred_confidences, pred_confs_deltas, pred_boxes_deltas = build_forward(H, tf.expand_dims(x_in, 0), googlenet, 'test', reuse=None)
                 grid_area = H['grid_height'] * H['grid_width']
@@ -167,7 +172,7 @@ class PlotExtractor(object):
                     pred_boxes = pred_boxes + pred_boxes_deltas
             else:
                 pred_boxes, pred_logits, pred_confidences = build_forward(H, tf.expand_dims(x_in, 0), googlenet, 'test', reuse=None)
-            saver = tf.train.Saver()
+            saver = tf.compat.v1.train.Saver()
 
         return graph, x_in, pred_boxes, pred_logits, pred_confidences, saver
 
@@ -182,6 +187,7 @@ class PlotExtractor(object):
         """
 
         img = Image.open(image_name)
+        #print image_name   
         
         if np.shape(img)[-1]==4:
             bg = Image.new("RGB", img.size, (255,255,255))
@@ -228,7 +234,7 @@ class PlotExtractor(object):
 
         self.draw_images(image_dir, true_annos_dict, pred_dict, image_output_dir, true_idl_dict)
 
-        pred_dict['labels'] = self.get_ocr(pred_dict['labels'], image_dir,3)
+        pred_dict['labels'] = self.get_ocr(pred_dict['labels'], image_dir)
 
         #pred_dict['labels'] = self.get_closest_ticks(pred_dict['labels'], pred_dict['ticks'])
 
@@ -249,9 +255,9 @@ class PlotExtractor(object):
         mylogger.debug("{} images/sec".format(float(len(pred_dict['labels']))/(time.time()-start_time)))
 
 
-        lab_dict = {}
+        labs_x, labs_y = [], []
+        
         for j, ann in enumerate(pred_dict['labels']):
-            labs = []
             img = self.open_image(image_dir+ann.imageName)
             try:
                 orient_text = pytesseract.image_to_osd(img) 
@@ -262,27 +268,34 @@ class PlotExtractor(object):
                 rotation = None
                 
             if rotation == 180 and pred_labels_X[j].rects:
-                pred_labels = pred_labels_X[j]
+                pred_y_labels = pred_labels_X[j]
+                pred_x_labels = pred_labels_Y[j]
             else:
-                pred_labels = pred_labels_Y[j] 
+                pred_y_labels = pred_labels_Y[j]
+                pred_x_labels = pred_labels_X[j]
+                
+            self.get_labels_bounds(pred_y_labels, ann, labs_y)
+            self.get_labels_bounds(pred_x_labels,ann,labs_x)
+            #print(ann.imagePath, ann.imageName)
+            
+        #print(labs_y)
+        #print(labs_x)
+        
+        lab_y_df = pd.DataFrame(labs_y, columns = ['ParentImageName','ImageName','Y_labels_pred','x1','x2','y1','y2'])
+        lab_x_df = pd.DataFrame(labs_x, columns = ['ParentImageName','ImageName','X_labels_pred','x1','x2','y1','y2'])
 
-            for rect in pred_labels.rects:
-                labs.append(rect.classID)
-            lab_dict[ann.imagePath+'/'+ann.imageName] = labs
-        #print lab_dict
-        lab_df = pd.DataFrame(list(lab_dict.items()), columns = ['ImageName','Y-labels-pred'])
-        lab_df['Min-label'] = [min(x) if x else None for x in lab_df['Y-labels-pred']]
-        lab_df['Max-label'] = [max(x) if x else None for x in lab_df['Y-labels-pred']] 
+        #lab_df['Min-label'] = [min(x) if x else None for x in lab_df['Y_labels_pred']]
+        #lab_df['Max-label'] = [max(x) if x else None for x in lab_df['Y_labels_pred']] 
         #print lab_df
         if csv_output_dir is not None:
             print 'saving predicted labels'
-            lab_df.to_csv(csv_output_dir + "/labels_pred.csv", index=False)    
-
-
+            lab_y_df.to_csv(csv_output_dir + "/y_labels_pred.csv", index=False)  
+            lab_x_df.to_csv(csv_output_dir + "/x_labels_pred.csv", index=False)
+            
         if coord_idl is not None:
             mylogger.debug("Now using ground truth to test ...")
             #self.get_metrics(df_dict, coord_idl, csv_output_dir, quick = quick, max_dist_perc = max_dist_perc)  
-            self.get_metrics_labels(lab_df,coord_idl,csv_output_dir)  
+            self.get_metrics_labels(lab_y_df,lab_x_df,coord_idl,csv_output_dir)  
 
         return pred_dict
 
@@ -300,7 +313,7 @@ class PlotExtractor(object):
         """
 
         annolist = al.AnnoList()
-        with tf.Session(graph = model['graph']) as sess:
+        with tf.compat.v1.Session(graph = model['graph']) as sess:
             sess.run(tf.initialize_all_variables())
             model['saver'].restore(sess, '{}/save.ckpt-{}'.format(model['dir'],self.iteration))
 
@@ -384,9 +397,9 @@ class PlotExtractor(object):
                 image = Image.fromarray(np.copy(img[max(0,int(rect.y1)-pixel_extra):int(rect.y2)+pixel_extra, max(0,int(rect.x1)-pixel_extra):int(rect.x2)+pixel_extra,:]))
                 label = tesseract.get_label(image)
                 #print label
-                if label is not None:
-                    rect.classID = label
-                    new_rects.append(rect)
+                #if label is not None:
+                rect.classID = label
+                new_rects.append(rect)
                     
             
             pred_labels[j].rects = new_rects
@@ -439,8 +452,29 @@ class PlotExtractor(object):
                 new_annot.rects = []
                 annolist.append(new_annot) 
 
-        annolist.save('close_labels.idl') 
+        #annolist.save('close_labels.idl') 
         return annolist 
+        
+    def get_labels_bounds(self, pred_labels, ann,labs):
+        """
+        Method that returns labels and bounding box of each label on each axis
+        Inputs:
+        pred_labels (Annotationlist): (Annotationlist) List of annotation which have the bounding boxes of the labels, and their corresponding values after OCR.
+        ann (Annotation) : (Annotation)
+        Outputs
+        labs (List): List for the predicted labels on the X or Y axis and the bounding box locations.
+        """
+        im_name = ann.imageName.rstrip('.jpg')
+            #print im_name
+        im_name = re.sub(r'\-\d+$', '',im_name)
+            #print im_name+'- after'
+        parent_image_name = ann.imagePath+'/'+im_name+'.jpg'
+        image_name = ann.imagePath+'/'+ann.imageName
+            #print(image_name)
+
+        for rect in pred_labels.rects:
+            labs.append([parent_image_name, image_name, rect.classID, round(rect.x1), round(rect.x2),round(rect.y1), round(rect.y2)])
+        #print(labs)
 
 
 
@@ -492,7 +526,7 @@ class PlotExtractor(object):
             else:
                 new_annot.rects = []
                 annolist.append(new_annot)
-        #annolist.save('close_ticks.idl')
+        annolist.save('close_ticks.idl')
 
 
         return annolist
@@ -522,12 +556,15 @@ class PlotExtractor(object):
             X, Y = np.reshape(np.array(X),(len(X),1)), np.reshape(np.array(Y),(len(Y),1))
             std_x = np.std(X)
             std_y = np.std(Y)
-            
+            #print X, Y
+            #print std_y/eps_std_div, std_x/eps_std_div
                         
             if std_x>0 and std_y>0:
                 db_scan_x = DBSCAN(eps=std_y/(eps_std_div), min_samples = 2).fit(Y)
                 db_scan_y = DBSCAN(eps=std_x/eps_std_div, min_samples = 2).fit(X)
-                
+                #db_scan_x = DBSCAN(eps=eps_y, min_samples = 2).fit(Y)
+                #db_scan_y = DBSCAN(eps=eps_x, min_samples = 2).fit(X)
+                #print db_scan_x.labels_, db_scan_y.labels_
                 cluster_list_x = filter(lambda x: x!=-1, db_scan_x.labels_)
                 cluster_list_y = filter(lambda x: x!=-1, db_scan_y.labels_)
                 #print cluster_list_x, cluster_list_y
@@ -542,11 +579,11 @@ class PlotExtractor(object):
                         elif db_scan_y.labels_[k]==cluster_label_y and db_scan_x.labels_[k]!=cluster_label_x:
                             rect_y.append(pred_labels[j].rects[k])
                     pred_X.rects, pred_Y.rects = rect_x, rect_y
-            
+            #print pred_X.printContent()
 
             pred_labels_X.append(pred_X), pred_labels_Y.append(pred_Y)
-        #pred_labels_Y.save('test_y.idl')
-        #pred_labels_X.save('test_x.idl')
+        pred_labels_Y.save('test_y.idl')
+        pred_labels_X.save('test_x.idl')
 
         return pred_labels_X, pred_labels_Y
 
@@ -740,7 +777,8 @@ class PlotExtractor(object):
         df_prec_recall : (pandas dataframe) Pandas dataframe of precisions and recalls for each plot.
         """
 
-        df_dict_true = parse_coords(coord_idl)
+        #df_dict_true = parse_coords(coord_idl)
+        df_dict_true = parse_labels(coord_idl)
         precision_list, recall_list, image_name_list = [], [], []
         count_good = 0
         count_perfect = 0
@@ -784,46 +822,49 @@ class PlotExtractor(object):
         return df_prec_recall
 
 
-    def get_metrics_labels(self, df_pred, coord_idl, csv_output_dir = None):
+    def get_metrics_labels(self, df_pred_y, df_pred_x, coord_idl, csv_output_dir = None):
         """
         Method which computes the precision and recall for all the plots.
         Inputs:
-        df_pred (Dataframe): Dictionnary of dataframes wich contains the predicted points in label coordinates.
-        coord_idl (string): Path to the idl files which contain the ground truth coordinates
+        df_pred_y (Dataframe): Dataframe which contains the predicted points in y label coordinates.
+        df_pred_x (Dataframe): Dataframe which contains the predicted points in y label coordinates.
+        coord_idl (string): Path to the csv file which contain the ground truth coordinates
         
         Outputs:
         df_prec_recall : (pandas dataframe) Pandas dataframe of precisions and recalls for each plot.
         """
 
-        df_true = parse_labels(coord_idl)
+        df_true = pd.read_csv(coord_idl, header=None, names=['ImageName','Num','Y_labels_true','x1','x2','y1','y2'])
+        df_true_labels = df_true[['ImageName','Y_labels_true']].groupby('ImageName').agg({'Y_labels_true':list}).reset_index()
+        #print(df_true_labels)
+        df_pred_y = df_pred_y[['ParentImageName','Y_labels_pred']].dropna()
+        #print(df_pred_y)
+        df_pred_labels = df_pred_y.groupby('ParentImageName').agg({'Y_labels_pred':list}).reset_index()
+        df_pred_labels.rename(columns={'ParentImageName':'ImageName'}, inplace=True)
+        #print(df_pred_labels)
+        df_pred_labels['ImageName'] = df_pred_labels['ImageName'].str.replace('/plots/','')
         precision_list, recall_list, image_name_list = [], [], []
         count_good = 0
         count_perfect = 0
         count_bad = 0
         metrics_logger = scatteract_logger.get_logger()
-        
+        #print df_pred.loc[0,'ImageName']
+        #print df_true.loc[0,'ImageName']
 
-        df = df_pred.join(df_true.set_index('ImageName'), on='ImageName')
-        #print df
+        df = df_pred_labels.join(df_true_labels.set_index('ImageName'), on='ImageName')
+        #print df, len(df)
           
         for j in range(len(df)):
-            true = df.loc[j,'Y-labels-true']
-            #print true, len(true)
-            pred = df.loc[j,'Y-labels-pred']
-            #print pred, len(pred)
+            true = df.loc[j,'Y_labels_true']
+            pred = df.loc[j,'Y_labels_pred']
             
             labs_nd = list((Counter(true) - Counter(pred)).elements())
-            #print labs_nd
             inc_labs_d = list((Counter(pred) - Counter(true)).elements())
-            #print inc_labs_d
             c_labs_d = list((Counter(pred) - Counter(inc_labs_d)).elements())
-            #print c_labs_d
 
 
             prec = len(c_labs_d)/float(len(pred))
-            #print prec
             rec = len(c_labs_d)/float(len(true))
-            #print rec        
             
             precision_list.append(prec)
             recall_list.append(rec)
@@ -842,6 +883,13 @@ class PlotExtractor(object):
         metrics_logger.info("Precision: {}".format(np.mean(precision_list)))
         metrics_logger.info("Recall: {}".format(np.mean(recall_list)))
         metrics_logger.info("F1 score: {}".format(2*np.mean(recall_list)*np.mean(precision_list)/(np.mean(recall_list)+np.mean(precision_list))))
+        
+        print("Percentage of good extraction (recall and precision above 80%): {}".format(float(count_good)/len(precision_list)))
+        print("Percentage of perfect extraction (recall and precision at 100%): {}".format(float(count_perfect)/len(precision_list)))
+        print("Percentage of bad extraction (recall and precision below 10%): {}".format(float(count_bad)/len(precision_list)))
+        print("Precision: {}".format(np.mean(precision_list)))
+        print("Recall: {}".format(np.mean(recall_list)))
+        print("F1 score: {}".format(2*np.mean(recall_list)*np.mean(precision_list)/(np.mean(recall_list)+np.mean(precision_list))))
 
         df_prec_recall = pd.DataFrame({"image_name":image_name_list,"recall":recall_list,"precision":precision_list})
         if csv_output_dir is not None:

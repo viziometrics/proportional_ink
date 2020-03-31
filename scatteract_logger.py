@@ -15,6 +15,7 @@ def get_logger():
 
     full_file_name = "scatteract.log"
     bblogger = logging.getLogger(__name__)
+    bblogger.propagate = False
     bblogger.setLevel(logging.DEBUG)
 
     fmt = logging.Formatter(LOGGING_MSG_FORMAT, datefmt=LOGGING_DATE_FORMAT)
