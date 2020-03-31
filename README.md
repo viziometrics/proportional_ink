@@ -29,8 +29,8 @@ backports.functools_lru_cache
 ### Other Requirement: Pre-trained models
 Download pre-trained models directory: [pre-trained models](https://drive.google.com/drive/folders/1O0ad9ZTW8Q67_6GI7kgn1RSBS27m3pir?usp=sharing).
 
-Copy labels_v1 and ticks_v1 to ouput folder
-Copy classifybars to bc_models folder
+Copy labels_v1 and ticks_v1 to ouput folder <br />
+Copy classifybars to bc_models folder <br />
 Copy figure-separation-model to figure-separator/data folder
 
 ## How to use:
